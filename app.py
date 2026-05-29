@@ -1,59 +1,77 @@
 from flask import Flask, request, jsonify
-from pymongo import MongoClient
-import certifi
+from instagrapi import Client
+import os
 
 app = Flask(__name__)
 
-# --- Database Connection ---
-# SSL Error ফিক্স করার জন্য certifi.where() ব্যবহার করা হয়েছে
-MONGO_URI = "mongodb+srv://ratnadipbagchi1_db_user:GU7b3gJjzy1Cry4U@cluster0.tsnhpjj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+IG_USERNAME = "ginx_6016"
+IG_PASSWORD = "ranojit1"
+IG_SETTINGS = "ig_settings.json"
 
-try:
-    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-    db = client['UserDatabase']
-    collection = db['PhoneRecords']
-except Exception as e:
-    print(f"Database Connection Error: {e}")
 
-@app.route('/api/lookup', methods=['GET'])
-def lookup_number():
-    number = request.args.get('number')
+class InstagramAPI:
+    def __init__(self):
+        self.cl = Client()
+        self.login()
 
-    if not number:
-        return jsonify({
-            "status": "error",
-            "message": "Mobile number is required"
-        }), 400
+    def login(self):
+        if os.path.exists(IG_SETTINGS):
+            self.cl.load_settings(IG_SETTINGS)
+        self.cl.login(IG_USERNAME, IG_PASSWORD)
+        self.cl.dump_settings(IG_SETTINGS)
 
-    try:
-        # Search the database
-        record = collection.find_one({"MOBILE": number})
+    def get_user_info(self, username):
+        try:
+            user_id = self.cl.user_id_from_username(username)
+            info = self.cl.user_info(user_id)
 
-        if record:
-            response = {
-                "Name": record.get("NAME", "N/A"),
-                "Father's Name": record.get("fname", "N/A"),
-                "Address": record.get("ADDRESS", "N/A"),
-                "Circle": record.get("circle", "N/A"),
-                "Mobile": record.get("MOBILE", "N/A"),
-                "Alternate": record.get("alt", "N/A"),
-                "ID": record.get("id", "N/A"),
-                "Email": record.get("email", "N/A"),
-                "developer": "@XEORX_MOD"
+            followers = self.cl.user_followers(user_id, amount=10)
+            following = self.cl.user_following(user_id, amount=10)
+
+            return {
+                "account": {
+                    "username": info.username,
+                    "full_name": info.full_name,
+                    "biography": info.biography,
+                    "followers": info.follower_count,
+                    "following": info.following_count,
+                    "posts": info.media_count,
+                    "private": info.is_private,
+                    "verified": info.is_verified,
+                    "profile_pic": str(info.profile_pic_url),
+                },
+
+                "followers_list": [
+                    {
+                        "username": u.username,
+                        "full_name": u.full_name
+                    } for u in followers.values()
+                ],
+
+                "following_list": [
+                    {
+                        "username": u.username,
+                        "full_name": u.full_name
+                    } for u in following.values()
+                ]
             }
-            return jsonify(response), 200
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "No real record found for this number"
-            }), 404
 
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Server Error: {str(e)}"
-        }), 500
+        except Exception as e:
+            return {"error": str(e)}
 
-# Vercel-এর জন্য app অবজেক্টটি এক্সপোর্ট করা হলো
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+ig = InstagramAPI()
+
+
+@app.route("/info", methods=["GET"])
+def info():
+    username = request.args.get("username")
+    if not username:
+        return jsonify({"error": "username query parameter is required"}), 400
+
+    data = ig.get_user_info(username)
+    return jsonify(data)
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
